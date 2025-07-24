@@ -8,13 +8,12 @@ from pathlib import Path
 import yt_dlp
 import imageio_ffmpeg
 
-# Get ffmpeg executable path from imageio-ffmpeg
+# Get full path to ffmpeg binary from imageio-ffmpeg
 ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
-if not Path(ffmpeg_path).exists():
-    raise RuntimeError("FFmpeg binary not found by imageio-ffmpeg.")
+ffmpeg_dir = str(Path(ffmpeg_path).parent)
 
-# Add ffmpeg directory to PATH environment variable
-os.environ["PATH"] = str(Path(ffmpeg_path).parent) + os.pathsep + os.environ.get("PATH", "")
+# Add ffmpeg directory to PATH environment variable (optional but recommended)
+os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
 
 def download_youtube_audio(url):
     try:
@@ -31,7 +30,9 @@ def download_youtube_audio(url):
                 'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }],
-            'ffmpeg_location': str(Path(ffmpeg_path).parent),
+            # Explicitly tell yt-dlp where ffmpeg and ffprobe are
+            'ffmpeg_location': ffmpeg_dir,
+            'ffprobe_location': ffmpeg_dir,
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -42,9 +43,6 @@ def download_youtube_audio(url):
         raise RuntimeError(f"Failed to download audio from YouTube: {e}")
 
 def run_demucs(audio_path, model='htdemucs', device='cpu'):
-    if not Path(audio_path).is_file():
-        raise FileNotFoundError(f"Input audio file not found: {audio_path}")
-
     output_dir = tempfile.mkdtemp(prefix="demucs_out_")
     command = [
         sys.executable, "-m", "demucs",
@@ -54,25 +52,25 @@ def run_demucs(audio_path, model='htdemucs', device='cpu'):
         audio_path
     ]
 
-    # For 4-stem model, run two-stem mode (vocals + rest)
+    # Add two-stems option for 4-stem model (vocals + rest)
     if model == "htdemucs":
         command.insert(3, "--two-stems")
         command.insert(4, "vocals")
 
     try:
-        subprocess.run(command, check=True, capture_output=True, text=True)
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as e:
         raise RuntimeError(
             f"Demucs failed with exit code {e.returncode}.\n"
             f"Stdout: {e.stdout}\nStderr: {e.stderr}"
         )
     except FileNotFoundError:
-        raise RuntimeError("Demucs is not installed or not found in PATH.")
+        raise RuntimeError("Demucs is not installed or not found in PATH. Ensure 'python -m demucs' works in your environment.")
 
-    # Find Demucs output folder
-    for root, dirs, _ in os.walk(output_dir):
+    # Find output folder created by Demucs
+    for root, dirs, files in os.walk(output_dir):
         for d in dirs:
             if d.startswith(model):
                 return os.path.join(output_dir, d)
 
-    raise RuntimeError("Could not find Demucs output directory.")
+    raise RuntimeError("Demucs output not found.")
