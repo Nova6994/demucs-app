@@ -122,6 +122,6 @@ def cleanup():
             pass
 
 st.cache_data.clear()  # Optional: clear cached data on rerun (Streamlit 1.20+)
-st.experimental_rerun()
+st.experimental_refresh()
 
 cleanup()
