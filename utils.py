@@ -1,58 +1,23 @@
+# utils.py
+
 import os
-import sys
 import subprocess
 import tempfile
 from pathlib import Path
 import yt_dlp
-import shutil
+import ffmpeg_downloader
 
-# Download static ffmpeg binaries and set environment variables for yt-dlp and subprocess
-def setup_ffmpeg():
-    import requests
-    import zipfile
+# Ensure ffmpeg is available and path is set
+ffmpeg_downloader.install()
+ffmpeg_path = ffmpeg_downloader.utils.get_ffmpeg_path()
+os.environ["PATH"] = os.path.dirname(ffmpeg_path) + os.pathsep + os.environ["PATH"]
 
-    ffmpeg_dir = Path(tempfile.gettempdir()) / "ffmpeg_static"
-    if ffmpeg_dir.exists():
-        return ffmpeg_dir
 
-    url = "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
-    archive_path = ffmpeg_dir.parent / "ffmpeg-release-amd64-static.tar.xz"
-    ffmpeg_dir.parent.mkdir(exist_ok=True)
-
-    # Download ffmpeg archive
-    with requests.get(url, stream=True) as r:
-        r.raise_for_status()
-        with open(archive_path, 'wb') as f:
-            shutil.copyfileobj(r.raw, f)
-
-    # Extract
-    import tarfile
-    with tarfile.open(archive_path) as tar:
-        tar.extractall(path=ffmpeg_dir.parent)
-
-    # The extraction creates a folder like ffmpeg-<version>-amd64-static
-    extracted_folder = next(ffmpeg_dir.parent.glob("ffmpeg-*-amd64-static"))
-    # Rename/move to ffmpeg_static
-    if ffmpeg_dir.exists():
-        shutil.rmtree(ffmpeg_dir)
-    extracted_folder.rename(ffmpeg_dir)
-
-    return ffmpeg_dir
-
-# Prepare ffmpeg and update PATH
-ffmpeg_dir = setup_ffmpeg()
-ffmpeg_bin_path = ffmpeg_dir / "ffmpeg"
-ffprobe_bin_path = ffmpeg_dir / "ffprobe"
-os.environ["PATH"] = str(ffmpeg_dir) + os.pathsep + os.environ.get("PATH", "")
-
-def download_youtube_audio(url: str) -> str:
-    """Download best audio from YouTube URL to a temp file using yt-dlp and static ffmpeg"""
-    temp_audio = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-    temp_audio.close()
-
+def download_youtube_audio(url, ffmpeg_path=None):
+    output_path = tempfile.mktemp(suffix=".mp3")
     ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': temp_audio.name,
+        'outtmpl': output_path,
         'quiet': True,
         'noplaylist': True,
         'postprocessors': [{
@@ -60,40 +25,40 @@ def download_youtube_audio(url: str) -> str:
             'preferredcodec': 'mp3',
             'preferredquality': '192',
         }],
-        'ffmpeg_location': str(ffmpeg_dir),
     }
+
+    # Force ffmpeg location if provided or use auto-detected one
+    ydl_opts['ffmpeg_location'] = os.path.dirname(ffmpeg_path or ffmpeg_downloader.utils.get_ffmpeg_path())
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
 
-    return temp_audio.name
+    return output_path
 
-def run_demucs(audio_path: str, model="htdemucs", device="cpu") -> str:
-    """Run Demucs model on the audio file, return output folder path"""
-    output_dir = tempfile.mkdtemp(prefix="demucs_out_")
 
+def run_demucs(audio_path, model='htdemucs', device='cpu'):
+    output_dir = tempfile.mkdtemp()
     command = [
-        sys.executable, "-m", "demucs",
+        "python", "-m", "demucs",
         "--model", model,
         "--out", output_dir,
         "--device", device,
         audio_path
     ]
 
-    # Example: if you want 2-stem vocals + rest for htdemucs:
     if model == "htdemucs":
         command.insert(3, "--two-stems")
         command.insert(4, "vocals")
 
     try:
-        subprocess.run(command, check=True, capture_output=True, text=True)
+        subprocess.run(command, check=True)
     except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Demucs failed: {e.stderr}")
+        raise RuntimeError(f"Demucs failed: {e}")
 
-    # Find Demucs output folder (starts with model name)
+    # Locate folder with separated files
     for root, dirs, files in os.walk(output_dir):
         for d in dirs:
             if d.startswith(model):
-                return os.path.join(root, d)
+                return os.path.join(output_dir, d)
 
-    raise RuntimeError("Demucs output folder not found")
+    raise RuntimeError("Demucs output not found.")
