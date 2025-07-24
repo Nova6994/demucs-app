@@ -1,15 +1,25 @@
-# demucs_app.py
+# demucsapp.py
+
 
 import streamlit as st
 import subprocess
 import os
 import tempfile
 from pathlib import Path
+<<<<<<< HEAD
 import ffmpeg_downloader
 from utils import download_youtube_audio, run_demucs
 
 # Automatically download ffmpeg
 ffmpeg_downloader.download_ffmpeg()
+=======
+import imageio_ffmpeg
+from utils import download_youtube_audio, run_demucs
+
+
+# Ensure ffmpeg is available to subprocess by adding to PATH
+os.environ["PATH"] += os.pathsep + os.path.dirname(imageio_ffmpeg.get_ffmpeg_exe())
+>>>>>>> 3f26d4d (save work before pulling)
 
 # Page config
 st.set_page_config(page_title="Demucs Stem Splitter", layout="centered")
