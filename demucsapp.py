@@ -1,17 +1,13 @@
-# dmucsapp.py
-
 import streamlit as st
 from pathlib import Path
 import tempfile
 import os
-import shutil
-from utils import download_youtube_audio, run_demucs, FFMPEG_BIN, FFPROBE_BIN
 import torch
+from utils import download_youtube_audio, run_demucs, FFMPEG_BIN, FFPROBE_BIN
 
-# Set page config and dark theme with red accent
+# --- Page config and styling ---
 st.set_page_config(page_title="Demucs Stem Separator", layout="centered")
 
-# Custom CSS for black/red theme
 st.markdown(
     """
     <style>
@@ -55,23 +51,26 @@ st.markdown(
 
 st.title("🎵 Demucs Stem Separator")
 
-# Device selection
+# --- Device selection ---
 device = "cuda" if torch.cuda.is_available() else "cpu"
 device = st.sidebar.selectbox("Select device", options=["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"])
 
-# Input selection
+# --- Input selection ---
 input_type = st.radio("Choose input type:", ["YouTube URL", "Upload Audio File"])
 
+# Store temp files for cleanup
+if "temp_files" not in st.session_state:
+    st.session_state.temp_files = []
+
 audio_file_path = None
-temp_files = []
 
 if input_type == "YouTube URL":
     url = st.text_input("Enter YouTube video URL:")
     if url:
         with st.spinner("Downloading audio from YouTube..."):
             try:
-                audio_file_path = download_youtube_audio(url)
-                temp_files.append(audio_file_path)
+                audio_file_path = download_youtube_audio(url, ffmpeg_path=FFMPEG_BIN)
+                st.session_state.temp_files.append(audio_file_path)
                 st.success("Audio downloaded!")
             except Exception as e:
                 st.error(f"Error downloading audio: {e}")
@@ -81,7 +80,7 @@ else:
         with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded_file.name).suffix) as tmp:
             tmp.write(uploaded_file.read())
             audio_file_path = tmp.name
-            temp_files.append(audio_file_path)
+            st.session_state.temp_files.append(audio_file_path)
         st.success(f"Uploaded file: {uploaded_file.name}")
 
 if audio_file_path:
@@ -113,15 +112,17 @@ if audio_file_path:
             except Exception as e:
                 st.error(f"Error during separation: {e}")
 
-# Cleanup temp files on rerun
+# --- Cleanup function ---
 def cleanup():
-    for f in temp_files:
+    for f in st.session_state.temp_files:
         try:
             os.remove(f)
         except Exception:
             pass
+    st.session_state.temp_files = []
 
-st.cache_data.clear()  # Optional: clear cached data on rerun (Streamlit 1.20+)
-st.experimental_rerun()
-
-cleanup()
+# Manual cleanup and cache clear button
+if st.button("Clear temporary files and cache"):
+    cleanup()
+    st.cache_data.clear()
+    st.experimental_rerun()
