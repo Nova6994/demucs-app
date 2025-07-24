@@ -1,77 +1,99 @@
 import os
+import sys
+import subprocess
 import tempfile
-import urllib.request
-import tarfile
-import shutil
 from pathlib import Path
 import yt_dlp
+import shutil
 
-# Directory to store static ffmpeg binaries
-FFMPEG_DIR = Path(tempfile.gettempdir()) / "ffmpeg_static"
+# Download static ffmpeg binaries and set environment variables for yt-dlp and subprocess
+def setup_ffmpeg():
+    import requests
+    import zipfile
 
-def download_ffmpeg():
-    if (FFMPEG_DIR / "ffmpeg").exists() and (FFMPEG_DIR / "ffprobe").exists():
-        # ffmpeg already downloaded
-        return
+    ffmpeg_dir = Path(tempfile.gettempdir()) / "ffmpeg_static"
+    if ffmpeg_dir.exists():
+        return ffmpeg_dir
 
-    FFMPEG_DIR.mkdir(parents=True, exist_ok=True)
+    url = "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+    archive_path = ffmpeg_dir.parent / "ffmpeg-release-amd64-static.tar.xz"
+    ffmpeg_dir.parent.mkdir(exist_ok=True)
 
-    # Static ffmpeg build URL for Linux AMD64 - adjust if needed for other OSes
-    ffmpeg_url = "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+    # Download ffmpeg archive
+    with requests.get(url, stream=True) as r:
+        r.raise_for_status()
+        with open(archive_path, 'wb') as f:
+            shutil.copyfileobj(r.raw, f)
 
-    archive_path = FFMPEG_DIR / "ffmpeg.tar.xz"
-    urllib.request.urlretrieve(ffmpeg_url, archive_path)
-
-    # Extract the tar.xz archive
+    # Extract
+    import tarfile
     with tarfile.open(archive_path) as tar:
-        tar.extractall(path=FFMPEG_DIR)
+        tar.extractall(path=ffmpeg_dir.parent)
 
-    # Find extracted folder (something like ffmpeg-*-amd64-static)
-    extracted_folder = next(
-        (f for f in FFMPEG_DIR.iterdir() if f.is_dir() and "ffmpeg" in f.name and "static" in f.name),
-        None
-    )
-    if not extracted_folder:
-        raise RuntimeError("Failed to find extracted ffmpeg folder")
+    # The extraction creates a folder like ffmpeg-<version>-amd64-static
+    extracted_folder = next(ffmpeg_dir.parent.glob("ffmpeg-*-amd64-static"))
+    # Rename/move to ffmpeg_static
+    if ffmpeg_dir.exists():
+        shutil.rmtree(ffmpeg_dir)
+    extracted_folder.rename(ffmpeg_dir)
 
-    # Move ffmpeg and ffprobe binaries to FFMPEG_DIR root
-    shutil.move(str(extracted_folder / "ffmpeg"), str(FFMPEG_DIR / "ffmpeg"))
-    shutil.move(str(extracted_folder / "ffprobe"), str(FFMPEG_DIR / "ffprobe"))
+    return ffmpeg_dir
 
-    # Clean up extracted folder and archive
-    shutil.rmtree(extracted_folder)
-    archive_path.unlink()
+# Prepare ffmpeg and update PATH
+ffmpeg_dir = setup_ffmpeg()
+ffmpeg_bin_path = ffmpeg_dir / "ffmpeg"
+ffprobe_bin_path = ffmpeg_dir / "ffprobe"
+os.environ["PATH"] = str(ffmpeg_dir) + os.pathsep + os.environ.get("PATH", "")
 
-def download_youtube_audio(url):
-    download_ffmpeg()  # Ensure ffmpeg is downloaded
-
-    ffmpeg_path = str(FFMPEG_DIR.resolve())
-
-    # Add ffmpeg_path to PATH environment variable so yt-dlp finds ffmpeg and ffprobe
-    env = os.environ.copy()
-    env["PATH"] = ffmpeg_path + os.pathsep + env.get("PATH", "")
+def download_youtube_audio(url: str) -> str:
+    """Download best audio from YouTube URL to a temp file using yt-dlp and static ffmpeg"""
+    temp_audio = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+    temp_audio.close()
 
     ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": os.path.join(tempfile.gettempdir(), "%(id)s.%(ext)s"),
-        "quiet": True,
-        "noplaylist": True,
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "192",
+        'format': 'bestaudio/best',
+        'outtmpl': temp_audio.name,
+        'quiet': True,
+        'noplaylist': True,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
         }],
-        "ffmpeg_location": ffmpeg_path,  # Tell yt-dlp where ffmpeg binaries are
-        # Passing environment so subprocesses inherit the PATH with ffmpeg
-        "env": env,
+        'ffmpeg_location': str(ffmpeg_dir),
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info)
-        # The postprocessor changes extension to .mp3
-        if not filename.endswith(".mp3"):
-            filename = filename.rsplit(".", 1)[0] + ".mp3"
-        return filename
+        ydl.download([url])
 
-# Add your run_demucs or other functions below...
+    return temp_audio.name
+
+def run_demucs(audio_path: str, model="htdemucs", device="cpu") -> str:
+    """Run Demucs model on the audio file, return output folder path"""
+    output_dir = tempfile.mkdtemp(prefix="demucs_out_")
+
+    command = [
+        sys.executable, "-m", "demucs",
+        "--model", model,
+        "--out", output_dir,
+        "--device", device,
+        audio_path
+    ]
+
+    # Example: if you want 2-stem vocals + rest for htdemucs:
+    if model == "htdemucs":
+        command.insert(3, "--two-stems")
+        command.insert(4, "vocals")
+
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"Demucs failed: {e.stderr}")
+
+    # Find Demucs output folder (starts with model name)
+    for root, dirs, files in os.walk(output_dir):
+        for d in dirs:
+            if d.startswith(model):
+                return os.path.join(root, d)
+
+    raise RuntimeError("Demucs output folder not found")
