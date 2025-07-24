@@ -6,7 +6,7 @@ import subprocess
 import os
 import tempfile
 from pathlib import Path
-<<<<<<< HEAD
+
 import ffmpeg_downloader
 from utils import download_youtube_audio, run_demucs
 
