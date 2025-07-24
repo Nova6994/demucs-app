@@ -1,6 +1,7 @@
 streamlit
 yt-dlp
+imageio-ffmpeg
 demucs
 torch
 torchaudio
-ffmpeg-downloader
+
