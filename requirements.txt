@@ -4,4 +4,4 @@ demucs==4.0.1
 torch==2.7.1
 torchaudio==2.7.1
 requests==2.32.4
-ffmpeg-python==0.2.0
+ffmpeg_downloader
