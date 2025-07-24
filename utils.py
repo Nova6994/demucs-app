@@ -6,12 +6,9 @@ from pathlib import Path
 import yt_dlp
 import imageio_ffmpeg
 
-# Get ffmpeg binary path from imageio-ffmpeg package
+# Get ffmpeg executable path from imageio-ffmpeg
 ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
 ffmpeg_dir = str(Path(ffmpeg_path).parent)
-
-# Add ffmpeg directory to PATH environment variable
-os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
 
 def download_youtube_audio(url):
     try:
@@ -28,7 +25,9 @@ def download_youtube_audio(url):
                 'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }],
-            'ffmpeg_location': ffmpeg_dir,  # Tell yt-dlp where ffmpeg lives
+            'ffmpeg_location': ffmpeg_dir,  # Explicitly tell yt-dlp where ffmpeg lives
+            # Also set env for subprocesses
+            'env': {**os.environ, "PATH": ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")},
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -52,8 +51,12 @@ def run_demucs(audio_path, model='htdemucs', device='cpu'):
         command.insert(3, "--two-stems")
         command.insert(4, "vocals")
 
+    # Prepare environment for subprocess: ensure ffmpeg in PATH
+    env = os.environ.copy()
+    env["PATH"] = ffmpeg_dir + os.pathsep + env.get("PATH", "")
+
     try:
-        subprocess.run(command, check=True)
+        subprocess.run(command, check=True, env=env)
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Demucs failed with exit code {e.returncode}.\nStdout: {e.stdout}\nStderr: {e.stderr}")
     except FileNotFoundError:

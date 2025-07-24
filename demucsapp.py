@@ -4,14 +4,13 @@ import tempfile
 from pathlib import Path
 from utils import download_youtube_audio, run_demucs
 
-# Set page config & title
 st.set_page_config(page_title="🎧 Demucs Stem Splitter", layout="centered")
 st.title("🎧 Audio Stem Splitter")
 st.markdown(
     """
     <style>
     .stButton>button {
-        background-color: #4CAF50;
+        background-color: #1DB954;
         color: white;
         font-weight: bold;
         border-radius: 8px;
@@ -20,7 +19,7 @@ st.markdown(
         transition: background-color 0.3s ease;
     }
     .stButton>button:hover {
-        background-color: #45a049;
+        background-color: #17a34a;
         cursor: pointer;
     }
     .stRadio>div {
@@ -30,7 +29,6 @@ st.markdown(
     """, unsafe_allow_html=True
 )
 
-# Sidebar for settings
 st.sidebar.header("Separation Settings")
 stem_type = st.sidebar.selectbox(
     "Choose stem model",
@@ -40,7 +38,6 @@ model = "htdemucs" if "4-stem" in stem_type else "htdemucs_6s"
 
 device = st.sidebar.selectbox("Compute device", ["cpu", "cuda (GPU)"])
 
-# Audio input selection
 st.subheader("1. Upload or Provide YouTube Link")
 option = st.radio("Select input type:", ["YouTube Link", "Upload File"])
 
@@ -64,7 +61,6 @@ elif option == "Upload File":
             audio_path = tmp_file.name
         st.success(f"Uploaded file saved: {Path(audio_path).name}")
 
-# Demucs processing button
 if audio_path:
     if st.button("🔍 Separate Stems"):
         try:
