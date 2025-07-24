@@ -5,53 +5,56 @@ import subprocess
 import tempfile
 from pathlib import Path
 import yt_dlp
+import ffmpeg_downloader
 
+# Ensure ffmpeg is available and path is set
+ffmpeg_downloader.download_ffmpeg()
+ffmpeg_path = ffmpeg_downloader.utils.get_ffmpeg_path()
+os.environ["PATH"] = os.path.dirname(ffmpeg_path) + os.pathsep + os.environ["PATH"]
 
-def download_youtube_audio(url):
-    """
-    Downloads audio from a YouTube URL using yt-dlp.
-    Returns the path to the downloaded audio file.
-    """
-    temp_dir = tempfile.mkdtemp()
-    output_path = os.path.join(temp_dir, "%(title).80s.%(ext)s")
+def download_youtube_audio(url, ffmpeg_path=None):
+    output_path = tempfile.mktemp(suffix=".mp3")
     ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": output_path,
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "192",
+        'format': 'bestaudio/best',
+        'outtmpl': output_path,
+        'quiet': True,
+        'noplaylist': True,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
         }],
-        "quiet": True,
     }
+
+    if ffmpeg_path:
+        ydl_opts['ffmpeg_location'] = os.path.dirname(ffmpeg_path)
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
-    files = os.listdir(temp_dir)
-    for file in files:
-        if file.endswith(".mp3"):
-            return os.path.join(temp_dir, file)
-    raise FileNotFoundError("Failed to download or convert audio.")
 
+    return output_path
 
-def run_demucs(audio_path, model, device="cpu"):
-    """
-    Runs the Demucs stem separation on the provided audio file.
-    Returns the path to the folder containing separated stems.
-    """
+def run_demucs(audio_path, model='htdemucs', device='cpu'):
     output_dir = tempfile.mkdtemp()
     command = [
-        "python3" if os.name != "nt" else "python",
-        "-m", "demucs",
-        audio_path,
-        "--two-stems=vocals" if model == "htdemucs" else "",
+        "python", "-m", "demucs",
+        "--two-stems", "vocals" if model == "htdemucs" else None,
         "--model", model,
         "--out", output_dir,
-        "--device", device
+        "--device", device,
+        audio_path
     ]
-    # Clean out empty strings from command
-    command = [arg for arg in command if arg]
+
+    # Remove None values from command list
+    command = [arg for arg in command if arg is not None]
 
     subprocess.run(command, check=True)
-    # Demucs outputs to a folder with the original file name
-    base_name = Path(audio_path).stem
-    return os.path.join(output_dir, model, base_name)
+
+    # Locate folder with separated files
+    for root, dirs, files in os.walk(output_dir):
+        for d in dirs:
+            if d.startswith(model):
+                return os.path.join(output_dir, d)
+
+    raise RuntimeError("Demucs output not found.")
+

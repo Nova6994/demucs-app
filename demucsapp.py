@@ -1,17 +1,17 @@
 # demucsapp.py
 
-
 import streamlit as st
 import subprocess
 import os
 import tempfile
 from pathlib import Path
-
-import imageio_ffmpeg
+import ffmpeg_downloader
 from utils import download_youtube_audio, run_demucs
 
-# Ensure ffmpeg is available to subprocess by adding to PATH
-os.environ["PATH"] += os.pathsep + os.path.dirname(imageio_ffmpeg.get_ffmpeg_exe())
+# Automatically download and configure ffmpeg
+ffmpeg_downloader.download_ffmpeg()
+ffmpeg_path = ffmpeg_downloader.utils.get_ffmpeg_path()
+os.environ["PATH"] = os.path.dirname(ffmpeg_path) + os.pathsep + os.environ["PATH"]
 
 # Page config
 st.set_page_config(page_title="Demucs Stem Splitter", layout="centered")
@@ -36,7 +36,7 @@ if option == "YouTube Link":
     if youtube_url:
         with st.spinner("Downloading from YouTube..."):
             try:
-                audio_path = download_youtube_audio(youtube_url)
+                audio_path = download_youtube_audio(youtube_url, ffmpeg_path)
                 st.success("Download complete!")
             except Exception as e:
                 st.error(f"Download failed: {e}")
@@ -62,3 +62,4 @@ if audio_path and st.button("🔍 Separate Stems"):
                         st.download_button("Download " + file, f, file_name=file)
         except Exception as e:
             st.error(f"Demucs failed: {e}")
+
