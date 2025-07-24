@@ -121,7 +121,7 @@ def cleanup():
         except Exception:
             pass
 
-st.experimental_singleton.clear()  # Optional: clear cached data on rerun (Streamlit 1.20+)
+st.cache_data.clear()  # Optional: clear cached data on rerun (Streamlit 1.20+)
 st.experimental_rerun()
 
 cleanup()
