@@ -1,94 +1,127 @@
-# demucsapp.py
+# dmucsapp.py
 
 import streamlit as st
-import os
-from utils import download_youtube_audio, run_demucs
-import shutil
-import zipfile
-import base64
 from pathlib import Path
+import tempfile
+import os
+import shutil
+from utils import download_youtube_audio, run_demucs, FFMPEG_BIN, FFPROBE_BIN
+import torch
 
-st.set_page_config(page_title="Demucs Stem Splitter", page_icon="🎵", layout="centered")
+# Set page config and dark theme with red accent
+st.set_page_config(page_title="Demucs Stem Separator", layout="centered")
 
-st.markdown("""
+# Custom CSS for black/red theme
+st.markdown(
+    """
     <style>
     body {
-        background-color: #111;
-        color: #fff;
+        background-color: #121212;
+        color: #ff4444;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
     }
-    .stApp {
-        background-color: #111;
-    }
-    h1, h2, h3, h4, h5, h6, p, div {
-        color: #fff;
+    .css-18e3th9 {
+        background-color: #121212;
     }
     .stButton>button {
-        color: white;
-        background-color: #d00000;
+        background-color: #ff4444;
+        color: black;
         border-radius: 8px;
-        border: none;
-        padding: 0.5em 1em;
-        font-size: 1em;
+        font-weight: bold;
     }
-    .stTextInput>div>div>input {
-        background-color: #222;
-        color: white;
+    .stTextInput>div>input {
+        background-color: #222222;
+        color: #ff4444;
+        border: 1px solid #ff4444;
+        border-radius: 6px;
     }
-    .stSelectbox>div>div>div {
-        background-color: #222;
-        color: white;
+    .stRadio>div>div>label {
+        color: #ff4444;
+        font-weight: bold;
     }
-    .stFileUploader>div>div>div>input[type=file] {
-        color: white;
+    .stFileUploader>div>input {
+        color: #ff4444;
+    }
+    .stDownloadButton>button {
+        background-color: #ff4444;
+        color: black;
+        border-radius: 8px;
+        font-weight: bold;
     }
     </style>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
-st.title("🎶 Demucs Stem Splitter")
-st.write("Split audio into individual stems using Facebook's Demucs model. Works with YouTube links or uploaded audio files.")
+st.title("🎵 Demucs Stem Separator")
 
-option = st.radio("Choose your input method:", ("YouTube Link", "Upload File"))
+# Device selection
+device = "cuda" if torch.cuda.is_available() else "cpu"
+device = st.sidebar.selectbox("Select device", options=["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"])
 
-model = st.selectbox("Select model:", ["htdemucs", "htdemucs_6s"])
-device = st.selectbox("Device:", ["cpu"])  # GPU can be added if available
+# Input selection
+input_type = st.radio("Choose input type:", ["YouTube URL", "Upload Audio File"])
 
-audio_path = None
+audio_file_path = None
+temp_files = []
 
-if option == "YouTube Link":
-    url = st.text_input("Enter YouTube URL:")
-    if st.button("Download and Process") and url:
+if input_type == "YouTube URL":
+    url = st.text_input("Enter YouTube video URL:")
+    if url:
+        with st.spinner("Downloading audio from YouTube..."):
+            try:
+                audio_file_path = download_youtube_audio(url)
+                temp_files.append(audio_file_path)
+                st.success("Audio downloaded!")
+            except Exception as e:
+                st.error(f"Error downloading audio: {e}")
+else:
+    uploaded_file = st.file_uploader("Upload an audio file", type=["mp3", "wav", "m4a", "flac", "ogg", "aac"])
+    if uploaded_file is not None:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded_file.name).suffix) as tmp:
+            tmp.write(uploaded_file.read())
+            audio_file_path = tmp.name
+            temp_files.append(audio_file_path)
+        st.success(f"Uploaded file: {uploaded_file.name}")
+
+if audio_file_path:
+    st.write(f"Ready to separate audio file: {Path(audio_file_path).name}")
+
+    # Model selection
+    model = st.selectbox("Select Demucs model:", options=["htdemucs", "demucs", "tasnet"])
+
+    if st.button("Separate Audio"):
+        with st.spinner("Separating stems... This may take a while."):
+            try:
+                output_dir = run_demucs(audio_file_path, model=model, device=device)
+                st.success("Separation complete!")
+
+                # List stem files and provide downloads
+                stem_files = list(Path(output_dir).glob("*"))
+                if stem_files:
+                    st.write("Download separated stems:")
+                    for stem_file in stem_files:
+                        st.download_button(
+                            label=stem_file.name,
+                            data=open(stem_file, "rb").read(),
+                            file_name=stem_file.name,
+                            mime="audio/wav",
+                        )
+                else:
+                    st.warning("No stems found in output.")
+
+            except Exception as e:
+                st.error(f"Error during separation: {e}")
+
+# Cleanup temp files on rerun
+def cleanup():
+    for f in temp_files:
         try:
-            st.info("Downloading audio from YouTube...")
-            audio_path = download_youtube_audio(url)
-        except Exception as e:
-            st.error(f"Download failed: {e}")
+            os.remove(f)
+        except Exception:
+            pass
 
-elif option == "Upload File":
-    uploaded_file = st.file_uploader("Upload an audio file:", type=["mp3", "wav", "m4a"])
-    if uploaded_file:
-        temp_dir = Path("temp_upload")
-        temp_dir.mkdir(exist_ok=True)
-        audio_path = str(temp_dir / uploaded_file.name)
-        with open(audio_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
+st.experimental_singleton.clear()  # Optional: clear cached data on rerun (Streamlit 1.20+)
+st.experimental_rerun()
 
-if audio_path:
-    if st.button("Run Demucs Split"):
-        try:
-            st.info("Running Demucs...")
-            separated_path = run_demucs(audio_path, model=model, device=device)
-
-            # Zip results
-            zip_path = shutil.make_archive("separated_output", "zip", separated_path)
-            with open(zip_path, "rb") as f:
-                b64 = base64.b64encode(f.read()).decode()
-                href = f'<a href="data:application/zip;base64,{b64}" download="demucs_stems.zip">⬇️ Download stems</a>'
-                st.markdown(href, unsafe_allow_html=True)
-        except Exception as e:
-            st.error(f"Demucs processing failed: {e}")
-
-# Clean up
-if Path("temp_upload").exists():
-    shutil.rmtree("temp_upload", ignore_errors=True)
-if Path("separated_output.zip").exists():
-    os.remove("separated_output.zip")
+cleanup()
