@@ -1,78 +1,78 @@
 # utils.py
 
 import os
+import sys
 import subprocess
 import tempfile
 from pathlib import Path
 import yt_dlp
-import imageio_ffmpeg
+import ffmpeg_downloader
 
-def download_youtube_audio(url):
-    """
-    Downloads audio from a YouTube URL and returns the path to the downloaded mp3 file.
-    """
-    output_path = tempfile.mktemp(suffix=".mp3")
+# Install ffmpeg and get its path
+ffmpeg_downloader.install()
+ffmpeg_path = ffmpeg_downloader.utils.get_ffmpeg_path()
 
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': output_path,
-        'quiet': True,
-        'noplaylist': True,
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
-        # Tell yt_dlp to use the imageio_ffmpeg's ffmpeg binary
-        'ffmpeg_location': os.path.dirname(imageio_ffmpeg.get_ffmpeg_exe())
-    }
+if not ffmpeg_path or not Path(ffmpeg_path).exists():
+    raise RuntimeError("FFmpeg installation failed or ffmpeg binary not found.")
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
+# Add ffmpeg folder to PATH for yt-dlp and subprocess calls
+os.environ["PATH"] = str(Path(ffmpeg_path).parent) + os.pathsep + os.environ.get("PATH", "")
 
-    if not Path(output_path).exists():
-        raise RuntimeError("Failed to download or convert YouTube audio.")
+def download_youtube_audio(url, ffmpeg_path=None):
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmpfile:
+            output_path = tmpfile.name
 
-    return output_path
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': output_path,
+            'quiet': True,
+            'noplaylist': True,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+        }
+
+        if ffmpeg_path:
+            ydl_opts['ffmpeg_location'] = str(Path(ffmpeg_path).parent)
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+
+        return output_path
+    except Exception as e:
+        raise RuntimeError(f"Failed to download audio from YouTube: {e}")
 
 def run_demucs(audio_path, model='htdemucs', device='cpu'):
-    """
-    Runs Demucs stem separation on the given audio file.
-    Returns path to folder containing separated stems.
-    Raises RuntimeError on failure.
-    """
-    if not os.path.isfile(audio_path):
-        raise FileNotFoundError(f"Input audio file not found: {audio_path}")
-
-    output_dir = tempfile.mkdtemp(prefix="demucs_out_")
-
+    output_dir = tempfile.mkdtemp()
     command = [
-        "python", "-m", "demucs",
+        sys.executable, "-m", "demucs",
         "--model", model,
         "--out", output_dir,
         "--device", device,
         audio_path
     ]
 
-    # Add two-stem option for 4-stem model (vocals + rest)
+    # If using 4-stem model, add two-stems vocals option
     if model == "htdemucs":
         command.insert(3, "--two-stems")
         command.insert(4, "vocals")
 
     try:
-        result = subprocess.run(command, check=True, capture_output=True, text=True)
+        subprocess.run(command, check=True)
     except subprocess.CalledProcessError as e:
-        raise RuntimeError(
-            f"Demucs failed with exit code {e.returncode}.\n"
-            f"Stdout: {e.stdout}\nStderr: {e.stderr}"
-        )
+        raise RuntimeError(f"Demucs failed: {e}")
     except FileNotFoundError:
-        raise RuntimeError("Demucs is not installed or not found in PATH. Ensure 'python -m demucs' works in your environment.")
+        raise RuntimeError("Demucs not found. Make sure Demucs is installed and accessible.")
 
-    # Find folder with separated stems
-    for root, dirs, files in os.walk(output_dir):
+    # Locate Demucs output folder
+    for root, dirs, _ in os.walk(output_dir):
         for d in dirs:
             if d.startswith(model):
                 return os.path.join(output_dir, d)
 
-    raise RuntimeError("Could not find Demucs output directory.")
+    raise RuntimeError("Demucs output not found.")
+
+
