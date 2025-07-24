@@ -1,5 +1,3 @@
-# utils.py
-
 import os
 import sys
 import subprocess
@@ -8,11 +6,12 @@ from pathlib import Path
 import yt_dlp
 import imageio_ffmpeg
 
-# Get ffmpeg binary path from imageio-ffmpeg
+# Get ffmpeg binary path from imageio-ffmpeg package
 ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+ffmpeg_dir = str(Path(ffmpeg_path).parent)
 
-# Add ffmpeg directory to PATH (some tools look there)
-os.environ["PATH"] = str(Path(ffmpeg_path).parent) + os.pathsep + os.environ.get("PATH", "")
+# Add ffmpeg directory to PATH environment variable
+os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
 
 def download_youtube_audio(url):
     try:
@@ -29,8 +28,7 @@ def download_youtube_audio(url):
                 'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }],
-            # **Critical: Point yt-dlp to bundled ffmpeg**
-            'ffmpeg_location': str(Path(ffmpeg_path).parent),
+            'ffmpeg_location': ffmpeg_dir,  # Tell yt-dlp where ffmpeg lives
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -50,25 +48,21 @@ def run_demucs(audio_path, model='htdemucs', device='cpu'):
         audio_path
     ]
 
-    # For 4-stem model, run two-stems option for vocals separation
     if model == "htdemucs":
         command.insert(3, "--two-stems")
         command.insert(4, "vocals")
 
     try:
-        subprocess.run(command, check=True, capture_output=True, text=True)
+        subprocess.run(command, check=True)
     except subprocess.CalledProcessError as e:
-        raise RuntimeError(
-            f"Demucs failed with exit code {e.returncode}.\n"
-            f"Stdout: {e.stdout}\nStderr: {e.stderr}"
-        )
+        raise RuntimeError(f"Demucs failed with exit code {e.returncode}.\nStdout: {e.stdout}\nStderr: {e.stderr}")
     except FileNotFoundError:
-        raise RuntimeError("Demucs is not installed or not found in PATH.")
+        raise RuntimeError("Demucs not found in PATH or not installed.")
 
-    # Locate output directory created by Demucs
+    # Locate Demucs output folder
     for root, dirs, _ in os.walk(output_dir):
         for d in dirs:
             if d.startswith(model):
                 return os.path.join(output_dir, d)
 
-    raise RuntimeError("Demucs output not found.")
+    raise RuntimeError("Demucs output directory not found.")
