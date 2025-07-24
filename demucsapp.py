@@ -1,49 +1,55 @@
 import streamlit as st
 import os
-import tempfile
 from pathlib import Path
 from utils import download_youtube_audio, run_demucs
+import tempfile
 
-st.set_page_config(page_title="🎧 Demucs Stem Splitter", layout="centered")
+# Page config & style
+st.set_page_config(page_title="🎧 Demucs Stem Splitter", layout="wide")
 st.title("🎧 Audio Stem Splitter")
 st.markdown(
     """
     <style>
+    .stApp {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    h1, h2, h3 {
+        font-weight: 700;
+        text-shadow: 1px 1px 3px rgba(0,0,0,0.3);
+    }
     .stButton>button {
-        background-color: #1DB954;
+        background-color: #764ba2;
         color: white;
         font-weight: bold;
         border-radius: 8px;
         padding: 10px 24px;
-        margin-top: 12px;
         transition: background-color 0.3s ease;
     }
     .stButton>button:hover {
-        background-color: #17a34a;
-        cursor: pointer;
-    }
-    .stRadio>div {
-        margin-bottom: 10px;
+        background-color: #5a3782;
     }
     </style>
     """, unsafe_allow_html=True
 )
 
+# Sidebar options
 st.sidebar.header("Separation Settings")
 stem_type = st.sidebar.selectbox(
     "Choose stem model",
     ["4-stem (Vocals, Drums, Bass, Other)", "6-stem (Vocals, Drums, Bass, Piano, Guitar, Other)"]
 )
 model = "htdemucs" if "4-stem" in stem_type else "htdemucs_6s"
-
 device = st.sidebar.selectbox("Compute device", ["cpu", "cuda (GPU)"])
 
-st.subheader("1. Upload or Provide YouTube Link")
-option = st.radio("Select input type:", ["YouTube Link", "Upload File"])
+st.subheader("1. Upload Audio or Provide YouTube Link")
+
+input_type = st.radio("Select input type:", ["YouTube Link", "Upload File"])
 
 audio_path = None
 
-if option == "YouTube Link":
+if input_type == "YouTube Link":
     youtube_url = st.text_input("Enter YouTube URL:")
     if youtube_url:
         try:
@@ -53,29 +59,26 @@ if option == "YouTube Link":
         except Exception as e:
             st.error(f"Download failed: {e}")
 
-elif option == "Upload File":
-    uploaded_file = st.file_uploader("Upload audio file (WAV/MP3/FLAC)", type=["wav", "mp3", "flac"])
+elif input_type == "Upload File":
+    uploaded_file = st.file_uploader("Upload audio file (WAV, MP3, FLAC)", type=["wav", "mp3", "flac"])
     if uploaded_file:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded_file.name).suffix) as tmp_file:
-            tmp_file.write(uploaded_file.read())
-            audio_path = tmp_file.name
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded_file.name).suffix) as tmpfile:
+            tmpfile.write(uploaded_file.read())
+            audio_path = tmpfile.name
         st.success(f"Uploaded file saved: {Path(audio_path).name}")
 
 if audio_path:
     if st.button("🔍 Separate Stems"):
-        try:
-            with st.spinner("Running Demucs, please wait... This may take a few minutes"):
-                output_folder = run_demucs(audio_path, model=model, device="cuda" if "cuda" in device else "cpu")
-            st.success("Separation complete! Listen and download below:")
-
-            st.markdown("### 🎼 Separated Stems")
-            stem_files = [f for f in os.listdir(output_folder) if f.endswith(".wav")]
-            for stem_file in stem_files:
-                stem_path = os.path.join(output_folder, stem_file)
-                st.audio(stem_path)
-                with open(stem_path, "rb") as f:
-                    st.download_button(label=f"Download {stem_file}", data=f, file_name=stem_file)
-        except Exception as e:
-            st.error(f"Error during separation: {e}")
-else:
-    st.info("Provide a YouTube link or upload an audio file to get started.")
+        with st.spinner("Running Demucs stem separation... this might take a minute"):
+            try:
+                output_folder = run_demucs(audio_path, model, device="cuda" if "cuda" in device else "cpu")
+                st.success("Stem separation successful! 🎉")
+                st.markdown("### 🎼 Listen & Download Separated Stems")
+                for stem_file in os.listdir(output_folder):
+                    if stem_file.endswith(".wav"):
+                        stem_path = os.path.join(output_folder, stem_file)
+                        st.audio(stem_path)
+                        with open(stem_path, "rb") as f:
+                            st.download_button(f"Download {stem_file}", f, file_name=stem_file)
+            except Exception as e:
+                st.error(f"Stem separation failed: {e}")

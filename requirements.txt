@@ -1,7 +1,8 @@
 streamlit
 yt-dlp
-imageio-ffmpeg
-demucs
+demucs==4.0.1
 torch
 torchaudio
-
+einops
+numpy
+imageio-ffmpeg
