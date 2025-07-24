@@ -9,7 +9,7 @@ import yt_dlp
 import ffmpeg_downloader
 
 # Install ffmpeg and get its path
-ffmpeg_downloader.install()
+ffmpeg_downloader.download_ffmpeg()
 ffmpeg_path = ffmpeg_downloader.utils.get_ffmpeg_path()
 
 if not ffmpeg_path or not Path(ffmpeg_path).exists():
